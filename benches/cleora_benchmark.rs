@@ -22,10 +22,6 @@ fn fnv_hash(entity: &str) -> u64 {
     hasher.finish()
 }
 
-fn hash_benchmark(c: &mut Criterion) {
-    c.bench_function("hash", |b| b.iter(|| fnv_hash(black_box("cleora"))));
-}
-
 fn bench_hashes(c: &mut Criterion) {
     let mut group = c.benchmark_group("Hashing");
     for s in ["Poland", "Germany", "USA", "United Kingdom", "Norway"].iter() {
@@ -95,19 +91,15 @@ fn generate_combinations_with_length(
 
     let mut result: Vec<Vec<u64>> = Vec::with_capacity(combinations as usize);
     let cartesian = CartesianProduct::new(lens);
-    let mut counter = 0;
 
-    for indices in cartesian {
+    for (counter, indices) in cartesian.enumerate() {
         let mut arr: Vec<u64> = Vec::with_capacity(row_length + 1);
         arr.push(total_combinations);
-        let hashes_length = hashes.len();
-        for i in 0..hashes_length {
-            let id = indices[i];
-            let value = hashes.get(i).unwrap().get(id as usize).unwrap();
-            arr.push(*value);
+        for (i, idx) in indices.iter().enumerate() {
+            let value = hashes[i][*idx as usize];
+            arr.push(value);
         }
         result.insert(counter, arr);
-        counter += 1;
     }
 
     result

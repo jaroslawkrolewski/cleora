@@ -1,16 +1,15 @@
 use std::time::Instant;
 
-use clap::{App, Arg};
+use clap::{Arg, Command};
 use cleora::configuration;
 use cleora::configuration::Configuration;
 use cleora::persistence::entity::InMemoryEntityMappingPersistor;
 use cleora::pipeline::{build_graphs, train};
 use env_logger::Env;
+use log::info;
 use std::fs;
+use std::process;
 use std::sync::Arc;
-
-#[macro_use]
-extern crate log;
 
 fn main() {
     let env = Env::default()
@@ -20,106 +19,132 @@ fn main() {
 
     let now = Instant::now();
 
-    let matches = App::new("cleora")
-        .version("1.0.0")
+    let matches = Command::new("cleora")
+        .version("1.1.0")
         .author("Piotr Babel <piotr.babel@synerise.com> & Jacek Dabrowski <jack.dabrowski@synerise.com>")
         .about("cleora for embeddings calculation")
-        .arg(Arg::with_name("input")
-            .short("i")
+        .arg(Arg::new("input")
+            .short('i')
             .long("input")
             .required(true)
-            .help("Input file path")
-            .takes_value(true))
-        .arg(Arg::with_name("output-dir")
-            .short("o")
+            .help("Input file path"))
+        .arg(Arg::new("output-dir")
+            .short('o')
             .long("output-dir")
-            .help("Output directory for files with embeddings")
-            .takes_value(true))
-        .arg(Arg::with_name("dimension")
-            .short("d")
+            .help("Output directory for files with embeddings"))
+        .arg(Arg::new("dimension")
+            .short('d')
             .long("dimension")
             .required(true)
-            .help("Embedding dimension size")
-            .takes_value(true))
-        .arg(Arg::with_name("number-of-iterations")
-            .short("n")
+            .help("Embedding dimension size"))
+        .arg(Arg::new("number-of-iterations")
+            .short('n')
             .long("number-of-iterations")
-            .help("Max number of iterations")
-            .takes_value(true))
-        .arg(Arg::with_name("columns")
-            .short("c")
+            .help("Max number of iterations"))
+        .arg(Arg::new("columns")
+            .short('c')
             .long("columns")
             .required(true)
-            .help("Column names (max 12), with modifiers: [transient::, reflexive::, complex::]")
-            .takes_value(true))
-        .arg(Arg::with_name("relation-name")
-            .short("r")
+            .help("Column names (max 12), with modifiers: [transient::, reflexive::, complex::]"))
+        .arg(Arg::new("relation-name")
+            .short('r')
             .long("relation-name")
-            .help("Name of the relation, for output filename generation")
-            .takes_value(true))
-        .arg(Arg::with_name("prepend-field-name")
-            .short("p")
+            .help("Name of the relation, for output filename generation"))
+        .arg(Arg::new("prepend-field-name")
+            .short('p')
             .long("prepend-field-name")
-            .help("Prepend field name to entity in output")
-            .takes_value(true))
-        .arg(Arg::with_name("log-every-n")
-            .short("l")
+            .help("Prepend field name to entity in output"))
+        .arg(Arg::new("log-every-n")
+            .short('l')
             .long("log-every-n")
-            .help("Log output every N lines")
-            .takes_value(true))
-        .arg(Arg::with_name("in-memory-embedding-calculation")
-            .short("e")
+            .help("Log output every N lines"))
+        .arg(Arg::new("in-memory-embedding-calculation")
+            .short('e')
             .long("in-memory-embedding-calculation")
-            .possible_values(&["0", "1"])
-            .help("Calculate embeddings in memory or with memory-mapped files")
-            .takes_value(true))
+            .value_parser(["0", "1"])
+            .help("Calculate embeddings in memory or with memory-mapped files"))
         .get_matches();
 
     info!("Reading args...");
 
-    let input = matches.value_of("input").unwrap();
-    let output_dir = matches.value_of("output-dir").map(|s| s.to_string());
+    let input = matches.get_one::<String>("input").expect("input is required");
+    let output_dir = matches.get_one::<String>("output-dir").cloned();
     // try to create output directory for files with embeddings
     if let Some(output_dir) = output_dir.as_ref() {
-        fs::create_dir_all(output_dir).expect("Can't create output directory");
+        if let Err(e) = fs::create_dir_all(output_dir) {
+            eprintln!("Error: Can't create output directory '{}': {}", output_dir, e);
+            process::exit(1);
+        }
     }
-    let dimension: u16 = matches.value_of("dimension").unwrap().parse().unwrap();
+    let dimension: u16 = matches
+        .get_one::<String>("dimension")
+        .expect("dimension is required")
+        .parse()
+        .unwrap_or_else(|e| {
+            eprintln!("Error: Invalid dimension value: {}", e);
+            process::exit(1);
+        });
     let max_iter: u8 = matches
-        .value_of("number-of-iterations")
+        .get_one::<String>("number-of-iterations")
+        .map(|s| s.as_str())
         .unwrap_or("4")
         .parse()
-        .unwrap();
-    let relation_name = matches.value_of("relation-name").unwrap_or("emb");
+        .unwrap_or_else(|e| {
+            eprintln!("Error: Invalid number-of-iterations value: {}", e);
+            process::exit(1);
+        });
+    let relation_name = matches
+        .get_one::<String>("relation-name")
+        .map(|s| s.as_str())
+        .unwrap_or("emb");
     let prepend_field_name = {
         let value: u8 = matches
-            .value_of("prepend-field-name")
+            .get_one::<String>("prepend-field-name")
+            .map(|s| s.as_str())
             .unwrap_or("0")
             .parse()
-            .unwrap();
+            .unwrap_or_else(|e| {
+                eprintln!("Error: Invalid prepend-field-name value: {}", e);
+                process::exit(1);
+            });
         value == 1
     };
     let log_every: u32 = matches
-        .value_of("log-every-n")
+        .get_one::<String>("log-every-n")
+        .map(|s| s.as_str())
         .unwrap_or("10000")
         .parse()
-        .unwrap();
+        .unwrap_or_else(|e| {
+            eprintln!("Error: Invalid log-every-n value: {}", e);
+            process::exit(1);
+        });
     let in_memory_embedding_calculation = {
         let value: u8 = matches
-            .value_of("in-memory-embedding-calculation")
+            .get_one::<String>("in-memory-embedding-calculation")
+            .map(|s| s.as_str())
             .unwrap_or("1")
             .parse()
-            .unwrap();
+            .unwrap_or_else(|e| {
+                eprintln!("Error: Invalid in-memory-embedding-calculation value: {}", e);
+                process::exit(1);
+            });
         value == 1
     };
     let columns = {
-        let cols_str = matches.value_of("columns").unwrap();
+        let cols_str = matches.get_one::<String>("columns").expect("columns is required");
         let cols_str_separated: Vec<&str> = cols_str.split(' ').collect();
         match configuration::extract_fields(cols_str_separated) {
             Ok(cols) => match configuration::validate_fields(cols) {
                 Ok(validated_cols) => validated_cols,
-                Err(msg) => panic!("Invalid column fields. Message: {}", msg),
+                Err(msg) => {
+                    eprintln!("Error: Invalid column fields: {}", msg);
+                    process::exit(1);
+                }
             },
-            Err(msg) => panic!("Parsing problem. Message: {}", msg),
+            Err(msg) => {
+                eprintln!("Error: Column parsing problem: {}", msg);
+                process::exit(1);
+            }
         }
     };
 
@@ -138,8 +163,7 @@ fn main() {
     dbg!(&config);
 
     info!("Starting calculation...");
-    let in_memory_entity_mapping_persistor = InMemoryEntityMappingPersistor::new();
-    let in_memory_entity_mapping_persistor = Arc::new(in_memory_entity_mapping_persistor);
+    let in_memory_entity_mapping_persistor = Arc::new(InMemoryEntityMappingPersistor::default());
 
     let sparse_matrices = build_graphs(&config, in_memory_entity_mapping_persistor.clone());
     info!(

@@ -42,15 +42,16 @@ pub fn build_graphs(
     }
 
     let mut entity_processor =
-        EntityProcessor::new(&config, in_memory_entity_mapping_persistor, |hashes| {
+        EntityProcessor::new(config, in_memory_entity_mapping_persistor, |hashes| {
             bus.broadcast(hashes);
         });
 
-    let input_file = File::open(&config.input).expect("can't open file"); // handle error
+    let input_file = File::open(&config.input)
+        .unwrap_or_else(|e| panic!("Can't open input file '{}': {}", config.input, e));
     let mut buffered = BufReader::new(input_file);
 
     let mut line = String::new();
-    while buffered.read_line(&mut line).unwrap() > 0 {
+    while buffered.read_line(&mut line).expect("Failed to read line from input file") > 0 {
         let split: Vec<&str> = line.trim().split('\t').collect();
 
         entity_processor.process_row(split);
@@ -83,7 +84,7 @@ pub fn train(
         let in_memory_entity_mapping_persistor = in_memory_entity_mapping_persistor.clone();
         let handle = thread::spawn(move || {
             let directory = match config.output_dir.as_ref() {
-                Some(out) => format!("{}/", out.clone()),
+                Some(out) => format!("{}/", out),
                 None => String::from(""),
             };
             let ofp = format!(
@@ -115,7 +116,7 @@ pub fn train(
     }
 
     for join_handle in embedding_threads {
-        let _ = join_handle
+        join_handle
             .join()
             .expect("Couldn't join on the associated thread");
     }

@@ -91,7 +91,7 @@ pub fn extract_fields(cols: Vec<&str>) -> Result<Vec<Column>, String> {
 
         let parts_len = parts.len();
         if parts_len > 1 {
-            column_name = *parts.last().unwrap();
+            column_name = parts[parts_len - 1];
             let column_name_idx = parts_len - 1;
             for &part in &parts[..column_name_idx] {
                 if part.eq_ignore_ascii_case("transient") {

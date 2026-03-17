@@ -4,7 +4,7 @@ use crate::persistence::sparse_matrix::SparseMatrixPersistor;
 use crate::sparse_matrix::SparseMatrix;
 use fnv::FnvHasher;
 use log::info;
-use memmap::MmapMut;
+use memmap2::MmapMut;
 use rayon::prelude::*;
 use std::fs;
 use std::fs::OpenOptions;
@@ -56,7 +56,7 @@ where
             self.dimension, entities_count
         );
 
-        // no specific requirement (ca be lower as well)
+        // no specific requirement (can be lower as well)
         let max_hash = 8 * 1024 * 1024;
         let max_hash_float = max_hash as f32;
 
@@ -116,9 +116,7 @@ where
                 let (res_col, rnew_col) = data;
                 for j in 0..amount_of_data {
                     let entry = self.sparse_matrix_persistor.get_entry(j);
-                    let elem = rnew_col.get_mut(entry.row as usize).unwrap();
-                    let value = res_col.get(entry.col as usize).unwrap();
-                    *elem += *value * entry.value
+                    rnew_col[entry.row as usize] += res_col[entry.col as usize] * entry.value;
                 }
             })
             .map(|data| data.1)
@@ -140,12 +138,9 @@ where
         let entities_count = self.sparse_matrix_persistor.get_entity_counter() as usize;
         let mut row_sum = vec![0f32; entities_count];
 
-        for i in 0..(self.dimension as usize) {
-            for j in 0..entities_count {
-                let sum = row_sum.get_mut(j).unwrap();
-                let col: &Vec<f32> = res.get(i).unwrap();
-                let value = col.get(j).unwrap();
-                *sum += value.powi(2)
+        for col in res.iter().take(self.dimension as usize) {
+            for (j, sum) in row_sum.iter_mut().enumerate().take(entities_count) {
+                *sum += col[j].powi(2);
             }
         }
 
@@ -154,9 +149,7 @@ where
             .into_par_iter()
             .update(|col| {
                 for j in 0..entities_count {
-                    let value = col.get_mut(j).unwrap();
-                    let sum = row_sum.get(j).unwrap();
-                    *value /= sum.sqrt();
+                    col[j] /= row_sum[j].sqrt();
                 }
             })
             .collect();
@@ -185,12 +178,10 @@ where
                 let hash_occur = self
                     .sparse_matrix_persistor
                     .get_hash_occurrence(hash as u64);
-                let mut embedding: Vec<f32> = Vec::with_capacity(self.dimension as usize);
-                for j in 0..(self.dimension as usize) {
-                    let col: &Vec<f32> = res.get(j).unwrap();
-                    let value = col.get(i as usize).unwrap();
-                    embedding.insert(j, *value);
-                }
+                let embedding: Vec<f32> = res.iter()
+                    .take(self.dimension as usize)
+                    .map(|col| col[i as usize])
+                    .collect();
                 embedding_persistor.put_data(entity_name, hash_occur, embedding);
             };
         }
@@ -229,12 +220,13 @@ pub fn calculate_embeddings_mmap<T1, T2, T3>(
     let res = mult.propagate(max_iter, init);
     mult.persist(res, entity_mapping_persistor, embedding_persistor);
 
-    fs::remove_file(format!("{}_matrix_{}", sparse_matrix.get_id(), max_iter)).unwrap();
+    fs::remove_file(format!("{}_matrix_{}", sparse_matrix.get_id(), max_iter))
+        .expect("Failed to remove temporary matrix file");
 
     info!("Finalizing embeddings calculations!")
 }
 
-/// Provides matrix multiplication based on sparse matrix data.
+/// Provides matrix multiplication based on sparse matrix data using memory-mapped files.
 #[derive(Debug)]
 pub struct MatrixMultiplicatorMMap<'a, T: SparseMatrixPersistor + Sync> {
     pub dimension: u16,
@@ -260,12 +252,16 @@ where
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .open(file_name)
-            .unwrap();
-        file.set_len(number_of_bytes).unwrap();
-        let mut mmap = unsafe { MmapMut::map_mut(&file).unwrap() };
+            .expect("Failed to open matrix file for initialization");
+        file.set_len(number_of_bytes)
+            .expect("Failed to set matrix file length");
+        let mut mmap = unsafe {
+            MmapMut::map_mut(&file).expect("Failed to memory-map matrix file")
+        };
 
-        // no specific requirement (ca be lower as well)
+        // no specific requirement (can be lower as well)
         let max_hash = 8 * 1024 * 1024;
         let max_hash_float = max_hash as f32;
 
@@ -282,7 +278,7 @@ where
 
                         let start_idx = j * 4;
                         let end_idx = start_idx + 4;
-                        let pointer: *mut u8 = (&mut chunk[start_idx..end_idx]).as_mut_ptr();
+                        let pointer: *mut u8 = chunk[start_idx..end_idx].as_mut_ptr();
                         unsafe {
                             let value = pointer as *mut f32;
                             *value = col_value;
@@ -296,7 +292,7 @@ where
             self.dimension, entities_count
         );
 
-        mmap.flush();
+        mmap.flush().expect("Failed to flush memory-mapped file after initialization");
         mmap
     }
 
@@ -308,7 +304,8 @@ where
         for i in 0..max_iter {
             let next = self.next_power(i, new_res);
             new_res = self.normalize(next);
-            fs::remove_file(format!("{}_matrix_{}", self.sparse_matrix_id, i)).unwrap();
+            fs::remove_file(format!("{}_matrix_{}", self.sparse_matrix_id, i))
+                .expect("Failed to remove temporary matrix file during propagation");
             info!(
                 "Done iter: {}. Dims: {}, entities: {}, num data points: {}.",
                 i,
@@ -330,10 +327,14 @@ where
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .open(file_name)
-            .unwrap();
-        file.set_len(number_of_bytes).unwrap();
-        let mut mmap_output = unsafe { MmapMut::map_mut(&file).unwrap() };
+            .expect("Failed to open matrix file for next power iteration");
+        file.set_len(number_of_bytes)
+            .expect("Failed to set matrix file length");
+        let mut mmap_output = unsafe {
+            MmapMut::map_mut(&file).expect("Failed to memory-map output matrix file")
+        };
 
         let amount_of_data = self.sparse_matrix_persistor.get_amount_of_data();
 
@@ -347,7 +348,7 @@ where
 
                     let start_idx_input = ((i * entities_count) + entry.col as usize) * 4;
                     let end_idx_input = start_idx_input + 4;
-                    let pointer: *const u8 = (&input[start_idx_input..end_idx_input]).as_ptr();
+                    let pointer: *const u8 = input[start_idx_input..end_idx_input].as_ptr();
                     let input_value = unsafe {
                         let value = pointer as *const f32;
                         *value
@@ -356,7 +357,7 @@ where
                     let start_idx_output = entry.row as usize * 4;
                     let end_idx_output = start_idx_output + 4;
                     let pointer: *mut u8 =
-                        (&mut chunk[start_idx_output..end_idx_output]).as_mut_ptr();
+                        chunk[start_idx_output..end_idx_output].as_mut_ptr();
                     unsafe {
                         let value = pointer as *mut f32;
                         *value += input_value * entry.value;
@@ -364,7 +365,7 @@ where
                 }
             });
 
-        mmap_output.flush();
+        mmap_output.flush().expect("Failed to flush memory-mapped file after next power");
         mmap_output
     }
 
@@ -373,12 +374,10 @@ where
         let mut row_sum = vec![0f32; entities_count];
 
         for i in 0..(self.dimension as usize) {
-            for j in 0..entities_count {
-                let sum = row_sum.get_mut(j).unwrap();
-
+            for (j, sum) in row_sum.iter_mut().enumerate().take(entities_count) {
                 let start_idx = ((i * entities_count) + j) * 4;
                 let end_idx = start_idx + 4;
-                let pointer: *const u8 = (&res[start_idx..end_idx]).as_ptr();
+                let pointer: *const u8 = res[start_idx..end_idx].as_ptr();
                 let value = unsafe {
                     let value = pointer as *const f32;
                     *value
@@ -395,11 +394,11 @@ where
                 // i - number of dimension
                 // chunk - column/vector of bytes
                 for j in 0..entities_count {
-                    let sum = *row_sum.get(j).unwrap();
+                    let sum = row_sum[j];
 
                     let start_idx = j * 4;
                     let end_idx = start_idx + 4;
-                    let pointer: *mut u8 = (&mut chunk[start_idx..end_idx]).as_mut_ptr();
+                    let pointer: *mut u8 = chunk[start_idx..end_idx].as_mut_ptr();
                     unsafe {
                         let value = pointer as *mut f32;
                         *value /= sum.sqrt();
@@ -407,7 +406,7 @@ where
                 }
             });
 
-        res.flush();
+        res.flush().expect("Failed to flush memory-mapped file after normalization");
         res
     }
 
@@ -436,13 +435,13 @@ where
                 for j in 0..(self.dimension as usize) {
                     let start_idx = ((j * entities_count as usize) + i as usize) * 4;
                     let end_idx = start_idx + 4;
-                    let pointer: *const u8 = (&res[start_idx..end_idx]).as_ptr();
+                    let pointer: *const u8 = res[start_idx..end_idx].as_ptr();
                     let value = unsafe {
                         let value = pointer as *const f32;
                         *value
                     };
 
-                    embedding.insert(j, value);
+                    embedding.push(value);
                 }
                 embedding_persistor.put_data(entity_name, hash_occur, embedding);
             };

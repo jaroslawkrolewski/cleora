@@ -184,7 +184,7 @@ where
 
         self.rows_count += 1;
 
-        if self.rows_count % self.config.log_every_n as u64 == 0 {
+        if self.rows_count.is_multiple_of(self.config.log_every_n as u64) {
             info!("Number of lines processed: {}", self.rows_count);
         }
     }
@@ -343,7 +343,7 @@ mod tests {
             entity_processor.generate_combinations_with_length(hashes, lengths_and_offsets);
         assert_eq!(
             &SmallVec::from([total_combinations, 10, 20, 40]),
-            combinations.get(0).unwrap()
+            combinations.first().unwrap()
         );
         assert_eq!(
             &SmallVec::from([total_combinations, 10, 20, 50]),
@@ -403,7 +403,7 @@ mod tests {
         // columns configuration: ignored::column_1 transient::column_2 complex::reflexive::column3 column_4
         // first column is ignored - we don't process entities from that column
         // third column is reflexive so we put it at the end
-        let column_names = vec![
+        let column_names = [
             columns[1].name.clone(),
             columns[2].name.clone(),
             columns[3].name.clone(),

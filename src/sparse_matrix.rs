@@ -4,24 +4,40 @@ use crate::persistence::sparse_matrix::{
 };
 
 /// Creates combinations of column pairs as sparse matrices.
-/// Let's say that we have such columns configuration: complex::a reflexive::complex::b c. This is provided
-/// as Array[Column] after parsing the config.
+///
+/// Let's say that we have such columns configuration: `complex::a reflexive::complex::b c`.
+/// This is provided as `Array[Column]` after parsing the config.
+///
 /// The allowed column modifiers are:
-/// - transient - the field is virtual - it is considered during embedding process, no output file is written for the field,
-/// - complex   - the field is composite, containing multiple entity identifiers separated by space,
-/// - reflexive - the field is reflexive, which means that it interacts with itself, additional output file is written for every such field.
+///
+/// - `transient` - the field is virtual - it is considered during embedding process,
+///   no output file is written for the field,
+/// - `complex` - the field is composite, containing multiple entity identifiers separated by space,
+/// - `reflexive` - the field is reflexive, which means that it interacts with itself,
+///   additional output file is written for every such field.
+///
 /// We create sparse matrix for every columns relations (based on column modifiers).
 /// For our example we have:
+///
 /// - sparse matrix for column a and b,
 /// - sparse matrix for column a and c,
 /// - sparse matrix for column b and c,
 /// - sparse matrix for column b and b (reflexive column).
-/// Apart from column names in sparse matrix we provide indices for incoming data. We have 3 columns such as a, b and c
-/// but column b is reflexive so we need to include this column. The result is: Array(a, b, c, b).
-/// The rule is that every reflexive column is append with the order of occurrence to the end of constructed array.
-/// `dimension` - dimension for output embedding vector size
-/// `cols` columns configuration with transient, reflexive, complex marks
-/// return sparse matrices for columns configuration.
+///
+/// Apart from column names in sparse matrix we provide indices for incoming data.
+/// We have 3 columns such as a, b and c but column b is reflexive so we need to include
+/// this column. The result is: `Array(a, b, c, b)`.
+/// The rule is that every reflexive column is appended with the order of occurrence
+/// to the end of constructed array.
+///
+/// # Arguments
+///
+/// * `dimension` - dimension for output embedding vector size
+/// * `cols` - columns configuration with transient, reflexive, complex marks
+///
+/// # Returns
+///
+/// Sparse matrices for columns configuration.
 pub fn create_sparse_matrices(
     dimension: u16,
     cols: &[Column],
@@ -76,17 +92,24 @@ impl<T> SparseMatrix<T>
 where
     T: SparseMatrixPersistor + Sync,
 {
-    /// Handles hashes for one combination of incoming data. Let's say that input row looks like:
-    /// userId1   | productId1, productId2  | brandId1, brandId2
-    /// Note! To simplify explanation there is no any reflexive column so the result is:
-    /// (userId1, productId1, brandId1),
-    /// (userId1, productId1, brandId2),
-    /// (userId1, productId2, brandId1),
-    /// (userId1, productId2, brandId2)
-    /// These cartesian products are provided as array of hashes (long values). Sparse matrix has indices (to corresponding columns)
-    /// in order to read interesting hashes from provided array.
-    /// For one input row we actually call this function 4 times.
-    /// `hashes` - it contains array of hashes
+    /// Handles hashes for one combination of incoming data.
+    ///
+    /// Let's say that input row looks like:
+    /// `userId1 | productId1, productId2 | brandId1, brandId2`
+    ///
+    /// Note: To simplify explanation there is no reflexive column so the result is:
+    /// `(userId1, productId1, brandId1)`,
+    /// `(userId1, productId1, brandId2)`,
+    /// `(userId1, productId2, brandId1)`,
+    /// `(userId1, productId2, brandId2)`
+    ///
+    /// These cartesian products are provided as array of hashes (long values).
+    /// Sparse matrix has indices (to corresponding columns) in order to read interesting
+    /// hashes from provided array. For one input row we actually call this function 4 times.
+    ///
+    /// # Arguments
+    ///
+    /// * `hashes` - array of hashes
     pub fn handle_pair(&mut self, hashes: &[u64]) {
         let a = self.col_a_id;
         let b = self.col_b_id;
@@ -101,22 +124,27 @@ where
         self.sparse_matrix_persistor.finish();
     }
 
-    /// It creates sparse matrix for two columns in the incoming data.
+    /// Creates sparse matrix entries for two entities in a pair.
+    ///
     /// Let's say that we have such columns:
-    /// customers | products                | brands
-    /// incoming data:
-    /// userId1   | productId1, productId2  | brandId1, brandId2
-    /// userId2   | productId1              | brandId3, brandId4, brandId5
+    /// `customers | products | brands`
+    ///
+    /// Incoming data:
+    /// `userId1 | productId1, productId2 | brandId1, brandId2`
+    /// `userId2 | productId1 | brandId3, brandId4, brandId5`
     /// etc.
-    /// One of the sparse matrices could represent customers and products relation (products and brands relation, customers and brands relation).
-    /// This sparse matrix (customers and products relation) handles every combination in these columns according to
-    /// total combinations in a row.
-    /// The first row in the incoming data produces two combinations according to 4 total combinations:
-    /// userId1, productId1 and userId1, productId2
-    /// The second row produces one combination userId2, productId1 according to 3 total combinations.
-    /// `a_hash` - hash of a entity for a column A
-    /// `b_hash` - hash of a entity for a column B
-    /// `count` - total number of combinations in a row
+    ///
+    /// One of the sparse matrices could represent customers and products relation.
+    /// The first row produces two combinations according to 4 total combinations:
+    /// `userId1, productId1` and `userId1, productId2`.
+    /// The second row produces one combination `userId2, productId1` according to
+    /// 3 total combinations.
+    ///
+    /// # Arguments
+    ///
+    /// * `a_hash` - hash of an entity for column A
+    /// * `b_hash` - hash of an entity for column B
+    /// * `count` - total number of combinations in a row
     fn add_pair_symmetric(&mut self, a_hash: u64, b_hash: u64, count: u64) {
         let a = self.get_or_create_id(a_hash);
         let b = self.get_or_create_id(b_hash);

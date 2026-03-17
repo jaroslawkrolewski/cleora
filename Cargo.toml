@@ -1,8 +1,8 @@
 [package]
 name = "cleora"
-version = "1.0.0"
+version = "1.1.0"
 authors = ["Piotr Babel <piotr.babel@synerise.com>", "Jacek Dabrowski <jack.dabrowski@synerise.com>"]
-edition = "2018"
+edition = "2021"
 license-file = "LICENSE"
 readme = "README.md"
 description = """
@@ -11,18 +11,19 @@ Cleora is a general-purpose model for efficient, scalable learning of stable and
 
 [dependencies]
 bus = "2.2.3"
-clap = "2.33.3"
-env_logger = "0.8.1"
+clap = "4"
+env_logger = "0.11"
 fnv = "1.0.7"
-log = "0.4.11"
-memmap = "0.7.0"
-rayon = "1.5.0"
+log = "0.4"
+memmap2 = "0.9"
+rayon = "1.10"
 rustc-hash = "1.1.0"
-smallvec = "1.4.2"
+smallvec = "1.13"
 twox-hash = "1.6.0"
 
 [dev-dependencies]
-criterion = "0.3"
+criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3"
 
 [[bench]]
 name = "cleora_benchmark"

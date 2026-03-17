@@ -15,6 +15,12 @@ pub mod entity {
 
     impl InMemoryEntityMappingPersistor {
         pub fn new() -> Self {
+            Self::default()
+        }
+    }
+
+    impl Default for InMemoryEntityMappingPersistor {
+        fn default() -> Self {
             InMemoryEntityMappingPersistor {
                 entity_mappings: RwLock::new(FxHashMap::default()),
             }
@@ -72,7 +78,7 @@ pub mod sparse_matrix {
         fn finish(&self);
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Default)]
     pub struct InMemorySparseMatrixPersistor {
         entity_count: u32,
         edge_count: u32,
@@ -86,16 +92,7 @@ pub mod sparse_matrix {
 
     impl InMemorySparseMatrixPersistor {
         pub fn new() -> Self {
-            InMemorySparseMatrixPersistor {
-                entity_count: 0,
-                edge_count: 0,
-                hash_2_id: FxHashMap::default(),
-                id_2_hash: FxHashMap::default(),
-                hash_2_count: FxHashMap::default(),
-                row_sum: Vec::new(),
-                pair_index: FxHashMap::default(),
-                entries: Vec::new(),
-            }
+            Self::default()
         }
     }
 
@@ -107,7 +104,10 @@ pub mod sparse_matrix {
         }
 
         fn get_hash_occurrence(&self, hash: u64) -> u32 {
-            *self.hash_2_count.get(&hash).unwrap()
+            self.hash_2_count
+                .get(&hash)
+                .copied()
+                .expect("Hash occurrence not found for given hash")
         }
 
         fn get_id(&self, hash: u64) -> i32 {
@@ -179,8 +179,7 @@ pub mod sparse_matrix {
         }
 
         fn get_entry(&self, pos: u32) -> Entry {
-            let entry = &self.entries[pos as usize];
-            entry.clone()
+            self.entries[pos as usize].clone()
         }
 
         fn replace_entry(&mut self, pos: u32, entry: Entry) {
@@ -246,26 +245,38 @@ pub mod embedding {
     impl EmbeddingPersistor for TextFileVectorPersistor {
         fn put_metadata(&mut self, entity_count: u32, dimension: u16) {
             let metadata = format!("{} {}", entity_count, dimension);
-            self.buf_writer.write(metadata.as_bytes());
+            self.buf_writer
+                .write_all(metadata.as_bytes())
+                .expect("Failed to write embedding metadata");
         }
 
         fn put_data(&mut self, entity: String, occur_count: u32, vector: Vec<f32>) {
-            self.buf_writer.write(b"\n");
-            self.buf_writer.write(entity.as_bytes());
+            self.buf_writer
+                .write_all(b"\n")
+                .expect("Failed to write newline");
+            self.buf_writer
+                .write_all(entity.as_bytes())
+                .expect("Failed to write entity name");
 
             if self.produce_entity_occurrence_count {
                 let occur = format!(" {}", occur_count);
-                self.buf_writer.write(occur.as_bytes());
+                self.buf_writer
+                    .write_all(occur.as_bytes())
+                    .expect("Failed to write occurrence count");
             }
 
             for &v in &vector {
                 let vec = format!(" {}", v);
-                self.buf_writer.write(vec.as_bytes());
+                self.buf_writer
+                    .write_all(vec.as_bytes())
+                    .expect("Failed to write embedding value");
             }
         }
 
         fn finish(&mut self) {
-            self.buf_writer.write(b"\n");
+            self.buf_writer
+                .write_all(b"\n")
+                .expect("Failed to write final newline");
         }
     }
 }
